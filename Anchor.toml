@@ -1,5 +1,5 @@
 [features]
-seeds = false
+seeds = true
 skip-lint = false
 [programs.localnet]
 game_core = "9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf"
@@ -8,8 +8,8 @@ game_core = "9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
-wallet = "/Users/ellagoris/.config/solana/id.json"
+cluster = "localnet"
+wallet = "/Users/ellagoris/.config/solana/anchor.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
