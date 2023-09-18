@@ -14,9 +14,29 @@ Core program for the game
 - Run `anchor test` to run tests
 - Run `anchor deploy` to deploy
 
-## release
+## using it
 
 To call the program from the client side:
 
-- Run `yarn solita`
-- Copy the content from the `generated/` folder into the frontend app
+- Install the Anchor TS SDK: `yarn add @coral-xyz/anchor`
+- Copy the `target/types` folder into your app
+- Initialize the program with
+
+```ts
+const program = new Program(
+  IDL,
+  PROGRAM_ID,
+  new AnchorProvider(connection, wallet, {})
+)
+```
+
+- Call methods with
+
+```ts
+const ix = await program.methods
+  .initialize()
+  .accounts({
+    palace: palaceAddress,
+  })
+  .instruction()
+```
