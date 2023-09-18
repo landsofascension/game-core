@@ -13,3 +13,10 @@ Core program for the game
 - Run `anchor build` to build
 - Run `anchor test` to run tests
 - Run `anchor deploy` to deploy
+
+## release
+
+To call the program from the client side:
+
+- Run `yarn solita`
+- Copy the content from the `generated/` folder into the frontend app
