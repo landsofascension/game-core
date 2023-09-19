@@ -27,19 +27,23 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn mint_tokens(ctx: Context<Auth>, amount: u64) -> Result<()> {
-        // Create the MintTo struct for our context
-        let cpi_accounts = MintTo {
+    pub fn create_token_mint(_ctx: Context<CreateTokenMint>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+        let token_program = ctx.accounts.token_program.to_account_info();
+        let mint_to_accounts = MintTo {
             mint: ctx.accounts.mint.to_account_info(),
             to: ctx.accounts.destination_ata.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
+            authority: ctx.accounts.mint.to_account_info(),
         };
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-        // Create the CpiContext we need for the request
-        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        let bump = *ctx.bumps.get("mint").unwrap();
 
-        // Execute anchor's helper function to mint tokens
-        mint_to(cpi_ctx, amount)?;
+        mint_to(
+            CpiContext::new_with_signer(token_program, mint_to_accounts, &[&[b"mint", &[bump]]]),
+            amount
+        )?;
 
         Ok(())
     }
@@ -47,7 +51,13 @@ pub mod game_core {
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
-    #[account(init, payer = signer, space = 8 + 8, seeds = [signer.key().as_ref()], bump)]
+    #[account(
+        init,
+        payer = signer,
+        space = 8 + 8,
+        seeds = [b"palace".as_ref(), signer.key().as_ref()],
+        bump
+    )]
     pub palace: Account<'info, Palace>,
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -56,7 +66,7 @@ pub struct Initialize<'info> {
 
 #[derive(Accounts)]
 pub struct Upgrade<'info> {
-    #[account(mut, seeds = [signer.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
     pub palace: Account<'info, Palace>,
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -64,10 +74,27 @@ pub struct Upgrade<'info> {
 }
 
 #[derive(Accounts)]
-pub struct Auth<'info> {
+pub struct CreateTokenMint<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub signer: Signer<'info>,
+    #[account(
+        init,
+        seeds = [b"mint".as_ref()],
+        bump,
+        payer = signer,
+        mint::decimals = 0,
+        mint::authority = mint
+    )]
+    pub mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct MintTokens<'info> {
     #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(mut, seeds = [b"mint".as_ref()], bump)]
     pub mint: Account<'info, Mint>,
     #[account(mut)]
     pub destination_ata: Account<'info, TokenAccount>,

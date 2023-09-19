@@ -1,18 +1,35 @@
 import * as anchor from "@coral-xyz/anchor"
 import { Program } from "@coral-xyz/anchor"
 import { GameCore } from "../target/types/game_core"
-import { getAssociatedTokenAddress } from "@solana/spl-token"
+import {
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddress,
+} from "@solana/spl-token"
+import { expect } from "chai"
+
+if (!process.env.ANCHOR_WALLET || process.env.ANCHOR_WALLET === "") {
+  throw new Error("expected environment variable `ANCHOR_WALLET` is not set.")
+}
+
+const payer = anchor.web3.Keypair.fromSecretKey(
+  Buffer.from(
+    JSON.parse(
+      require("fs").readFileSync(process.env.ANCHOR_WALLET, {
+        encoding: "utf-8",
+      })
+    )
+  )
+)
 
 describe("game-core", () => {
-  // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env())
 
   const program = anchor.workspace.GameCore as Program<GameCore>
 
-  it("Is initialized!", async () => {
+  it("Can initialize the palace", async () => {
     // get palace PDA
     const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [program.provider.publicKey.toBytes()],
+      [Buffer.from("palace"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
@@ -31,15 +48,15 @@ describe("game-core", () => {
     console.log(palace)
   })
 
-  it("Can be upgraded", async () => {
+  it("Can upgrade the palace", async () => {
     // get palace PDA
     const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [program.provider.publicKey.toBytes()],
+      [Buffer.from("palace"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
     console.log(palaceAddress.toString())
-    // Add your test here.
+
     const tx = await program.methods
       .upgradePalace()
       .accounts({
@@ -54,28 +71,85 @@ describe("game-core", () => {
     console.log(palace)
   })
 
-  it("Can mint tokens", async () => {
+  it("Can create a token mint", async () => {
     // get palace PDA
-    const mint = new anchor.web3.PublicKey(
-      "4zfn53iuTbnQDsJDtJvnuhYaqC5JaGSPJUSvaG4zZT6u"
-    )
-    const destination = new anchor.web3.PublicKey(
-      "7x4JZgW2oeAcra18oMC7Tudu9h6D5cYMJnjy8AbubBVW"
-    )
+    const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint")],
+      anchor.workspace.GameCore.programId
+    )[0]
 
-    const ata = await getAssociatedTokenAddress(mint, destination)
-
-    console.log(destination.toString())
-
-    // Add your test here.
     const tx = await program.methods
-      .mintTokens(new anchor.BN(1e9))
+      .createTokenMint()
       .accounts({
-        mint,
-        destinationAta: ata,
+        mint: mintAddress,
       })
       .rpc()
 
     console.log("Your transaction signature", tx)
+  })
+
+  it("Can mint tokens to a wallet", async () => {
+    // get palace PDA
+    const mint = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint")],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    const destination = new anchor.web3.Keypair().publicKey
+    const ata = await getAssociatedTokenAddress(mint, destination)
+    const account = await program.provider.connection.getAccountInfo(ata)
+
+    const ixs = []
+    // create associated token account if it doesn't exist
+    if (!account) {
+      ixs.push(
+        createAssociatedTokenAccountInstruction(
+          program.provider.publicKey,
+          ata,
+          destination,
+          mint
+        )
+      )
+    }
+
+    ixs.push(
+      await program.methods
+        .mintTokens(new anchor.BN(1))
+        .accounts({
+          mint,
+          destinationAta: ata,
+        })
+        .instruction()
+    )
+
+    const message = new anchor.web3.TransactionMessage({
+      instructions: ixs,
+      payerKey: program.provider.publicKey,
+      recentBlockhash: (await program.provider.connection.getRecentBlockhash())
+        .blockhash,
+    }).compileToV0Message()
+
+    const tx = new anchor.web3.VersionedTransaction(message)
+
+    tx.sign([payer])
+
+    let previousBalance = 0
+
+    if (account) {
+      previousBalance = Number(
+        (await program.provider.connection.getTokenAccountBalance(ata)).value
+          .amount
+      )
+    }
+
+    const txid = await program.provider.connection.sendTransaction(tx)
+
+    await program.provider.connection.confirmTransaction(txid)
+    const newBalance = Number(
+      (await program.provider.connection.getTokenAccountBalance(ata)).value
+        .amount
+    )
+
+    expect(newBalance).to.be.greaterThan(previousBalance)
   })
 })
