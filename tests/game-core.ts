@@ -114,7 +114,7 @@ describe("game-core", () => {
 
     ixs.push(
       await program.methods
-        .mintTokens(new anchor.BN(1))
+        .mintTokens()
         .accounts({
           mint,
           destinationAta: ata,

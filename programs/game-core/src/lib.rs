@@ -7,6 +7,7 @@ declare_id!("9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf");
 #[account]
 pub struct Palace {
     pub level: i8,
+    pub last_mint_timestamp: i64,
 }
 
 #[program]
@@ -14,8 +15,12 @@ pub mod game_core {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        let clock = Clock::get()?;
+        let ts_now = clock.unix_timestamp;
+
         ctx.accounts.palace.set_inner(Palace {
             level: 1,
+            last_mint_timestamp: ts_now,
         });
 
         Ok(())
@@ -31,7 +36,7 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+    pub fn mint_tokens(ctx: Context<MintTokens>) -> Result<()> {
         let token_program = ctx.accounts.token_program.to_account_info();
         let mint_to_accounts = MintTo {
             mint: ctx.accounts.mint.to_account_info(),
@@ -40,10 +45,25 @@ pub mod game_core {
         };
         let bump = *ctx.bumps.get("mint").unwrap();
 
+        let clock = Clock::get()?;
+        let ts_now = clock.unix_timestamp;
+
+        // 1 token per second
+        let amount = ((ts_now - ctx.accounts.palace.last_mint_timestamp) * 1) as u64;
+
+        msg!("minting {} tokens", amount);
+
+        // mint tokens
         mint_to(
             CpiContext::new_with_signer(token_program, mint_to_accounts, &[&[b"mint", &[bump]]]),
             amount
         )?;
+
+        // update the palace
+        ctx.accounts.palace.set_inner(Palace {
+            level: 1,
+            last_mint_timestamp: ts_now,
+        });
 
         Ok(())
     }
@@ -54,7 +74,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 8,
+        space = 8 + 96,
         seeds = [b"palace".as_ref(), signer.key().as_ref()],
         bump
     )]
@@ -98,5 +118,7 @@ pub struct MintTokens<'info> {
     pub mint: Account<'info, Mint>,
     #[account(mut)]
     pub destination_ata: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
+    pub palace: Account<'info, Palace>,
     pub token_program: Program<'info, Token>,
 }
