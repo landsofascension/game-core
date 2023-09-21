@@ -48,29 +48,6 @@ describe("game-core", () => {
     console.log(palace)
   })
 
-  it("Can upgrade the palace", async () => {
-    // get palace PDA
-    const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("palace"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    console.log(palaceAddress.toString())
-
-    const tx = await program.methods
-      .upgradePalace()
-      .accounts({
-        palace: palaceAddress,
-      })
-      .rpc()
-
-    console.log("Your transaction signature", tx)
-
-    // fetch the palace account
-    const palace = await program.account.palace.fetch(palaceAddress)
-    console.log(palace)
-  })
-
   it("Can create a token mint", async () => {
     // get palace PDA
     const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
@@ -88,14 +65,14 @@ describe("game-core", () => {
     console.log("Your transaction signature", tx)
   })
 
-  it("Can mint tokens to a wallet", async () => {
+  it("Can collect tokens", async () => {
     // get palace PDA
     const mint = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint")],
       anchor.workspace.GameCore.programId
     )[0]
 
-    const destination = new anchor.web3.Keypair().publicKey
+    const destination = payer.publicKey
     const ata = await getAssociatedTokenAddress(mint, destination)
     const account = await program.provider.connection.getAccountInfo(ata)
 
@@ -151,5 +128,39 @@ describe("game-core", () => {
     )
 
     expect(newBalance).to.be.greaterThan(previousBalance)
+  })
+
+  it("Can upgrade the palace", async () => {
+    // get palace PDA
+    const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("palace"), program.provider.publicKey.toBytes()],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    const mint = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint")],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
+
+    const previousLevel = (await program.account.palace.fetch(palaceAddress))
+      .level
+
+    const txid = await program.methods
+      .upgradePalace()
+      .accounts({
+        palace: palaceAddress,
+        fromAta: ata,
+        mint,
+      })
+      .rpc()
+
+    await program.provider.connection.confirmTransaction(txid)
+
+    // fetch the palace account
+    const palace = await program.account.palace.fetch(palaceAddress)
+
+    expect(palace.level).to.be.greaterThan(previousLevel)
   })
 })

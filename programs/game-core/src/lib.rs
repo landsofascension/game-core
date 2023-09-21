@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use anchor_spl::{ token::{ Token, Mint, MintTo, mint_to, TokenAccount } };
+use anchor_spl::token::{ Token, Mint, MintTo, mint_to, TokenAccount, burn };
 
 declare_id!("9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf");
 
@@ -12,6 +12,8 @@ pub struct Palace {
 
 #[program]
 pub mod game_core {
+    use anchor_spl::token::Burn;
+
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -27,6 +29,22 @@ pub mod game_core {
     }
 
     pub fn upgrade_palace(ctx: Context<Upgrade>) -> Result<()> {
+        let token_program = &ctx.accounts.token_program;
+        let authority = &ctx.accounts.signer;
+
+        let cpi_accounts = Burn {
+            mint: ctx.accounts.mint.to_account_info().clone(),
+            from: ctx.accounts.from_ata.to_account_info().clone(),
+            authority: authority.to_account_info().clone(),
+        };
+
+        // Cost for upgrade based on Palace level
+        let cost = (ctx.accounts.palace.level as u64) * 1000;
+
+        // Burn tokens
+        burn(CpiContext::new(token_program.to_account_info(), cpi_accounts), cost)?;
+
+        // Upgrade palace
         ctx.accounts.palace.level = ctx.accounts.palace.level + 1;
 
         Ok(())
@@ -38,6 +56,7 @@ pub mod game_core {
 
     pub fn mint_tokens(ctx: Context<MintTokens>) -> Result<()> {
         let token_program = ctx.accounts.token_program.to_account_info();
+
         let mint_to_accounts = MintTo {
             mint: ctx.accounts.mint.to_account_info(),
             to: ctx.accounts.destination_ata.to_account_info(),
@@ -49,7 +68,8 @@ pub mod game_core {
         let ts_now = clock.unix_timestamp;
 
         // 1 token per second
-        let amount = ((ts_now - ctx.accounts.palace.last_mint_timestamp) * 1) as u64;
+        let seconds_elapsed = ts_now - ctx.accounts.palace.last_mint_timestamp;
+        let amount = (seconds_elapsed * 10000) as u64;
 
         msg!("minting {} tokens", amount);
 
@@ -90,6 +110,11 @@ pub struct Upgrade<'info> {
     pub palace: Account<'info, Palace>,
     #[account(mut)]
     pub signer: Signer<'info>,
+    #[account(mut)]
+    pub from_ata: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"mint".as_ref()], bump)]
+    pub mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
