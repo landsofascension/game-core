@@ -12,6 +12,7 @@ Core program for the game
 - Run `yarn install`
 - Run `anchor build` to build
 - Run `anchor test` to run tests
+  - Make sure you have your Solana wallet location into your Anchor.toml file
 - Run `anchor deploy` to deploy
 
 ## using it
