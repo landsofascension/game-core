@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anchor_lang::prelude::*;
 
 use anchor_spl::token::{ Token, Mint, MintTo, mint_to, TokenAccount, burn };
@@ -5,10 +7,25 @@ use anchor_spl::token::{ Token, Mint, MintTo, mint_to, TokenAccount, burn };
 declare_id!("9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf");
 
 #[account]
-pub struct Palace {
-    pub level: i8,
+pub struct Player {
+    pub experience: u64,
+    pub gold: u64,
+    pub lumber: u64,
+}
+
+#[account]
+pub struct PlayerPalace {
+    pub level: u32,
     pub last_mint_timestamp: i64,
 }
+
+#[account]
+pub struct PlayerMerchant {
+    pub level: u32,
+}
+
+const MERCHANT_ITEMS: [&str; 1] = ["Lumberjack"];
+const MERCHANT_ITEMS_COST: [u64; 1] = [1000];
 
 #[program]
 pub mod game_core {
@@ -20,10 +37,46 @@ pub mod game_core {
         let clock = Clock::get()?;
         let ts_now = clock.unix_timestamp;
 
-        ctx.accounts.palace.set_inner(Palace {
+        // init player
+        ctx.accounts.player.set_inner(Player {
+            experience: 0,
+            gold: 0,
+            lumber: 0,
+        });
+
+        // init buildings
+        ctx.accounts.palace.set_inner(PlayerPalace {
             level: 1,
             last_mint_timestamp: ts_now,
         });
+
+        ctx.accounts.merchant.set_inner(PlayerMerchant {
+            level: 0,
+        });
+
+        Ok(())
+    }
+
+    pub fn purchase_merchant_item(ctx: Context<PurchaseMerchantItem>, item: String) -> Result<()> {
+        let found = MERCHANT_ITEMS.iter().position(|&i| i == item);
+
+        match found {
+            None => {
+                return err!(ErrorCodes::MerchantItemNotFound);
+            }
+            Some(_) => {
+                let item = MERCHANT_ITEMS[found.unwrap()];
+                let cost = MERCHANT_ITEMS_COST[found.unwrap()];
+
+                msg!("purchasing item: {}", item);
+                msg!("cost: {}", cost);
+
+                // check if player has enough gold
+                if ctx.accounts.player.gold < cost {
+                    return Err(ErrorCodes::NotEnoughGold.into());
+                }
+            }
+        }
 
         Ok(())
     }
@@ -54,7 +107,7 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn mint_tokens(ctx: Context<MintTokens>) -> Result<()> {
+    pub fn collect_tokens(ctx: Context<CollectTokens>) -> Result<()> {
         let token_program = ctx.accounts.token_program.to_account_info();
 
         let mint_to_accounts = MintTo {
@@ -80,7 +133,7 @@ pub mod game_core {
         )?;
 
         // update the palace
-        ctx.accounts.palace.set_inner(Palace {
+        ctx.accounts.palace.set_inner(PlayerPalace {
             level: 1,
             last_mint_timestamp: ts_now,
         });
@@ -94,11 +147,39 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 96,
+        space = 8 + 8 * 4, // 4 fields of 8 bytes each
+        seeds = [b"player".as_ref(), signer.key().as_ref()],
+        bump
+    )]
+    pub player: Account<'info, Player>,
+    #[account(
+        init,
+        payer = signer,
+        space = 8 + 8 * 4, // 4 fields of 8 bytes each
         seeds = [b"palace".as_ref(), signer.key().as_ref()],
         bump
     )]
-    pub palace: Account<'info, Palace>,
+    pub palace: Account<'info, PlayerPalace>,
+    #[account(
+        init,
+        payer = signer,
+        space = 8 + 8 * 4, // 4 fields of 8 bytes each
+        seeds = [b"merchant".as_ref(), signer.key().as_ref()],
+        bump
+    )]
+    pub merchant: Account<'info, PlayerMerchant>,
+
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct PurchaseMerchantItem<'info> {
+    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    pub player: Account<'info, Player>,
+    #[account(mut, seeds = [b"merchant".as_ref(), signer.key().as_ref()], bump)]
+    pub merchant: Account<'info, PlayerMerchant>,
     #[account(mut)]
     pub signer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -107,7 +188,7 @@ pub struct Initialize<'info> {
 #[derive(Accounts)]
 pub struct Upgrade<'info> {
     #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
-    pub palace: Account<'info, Palace>,
+    pub palace: Account<'info, PlayerPalace>,
     #[account(mut)]
     pub signer: Signer<'info>,
     #[account(mut)]
@@ -136,7 +217,7 @@ pub struct CreateTokenMint<'info> {
 }
 
 #[derive(Accounts)]
-pub struct MintTokens<'info> {
+pub struct CollectTokens<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
@@ -144,6 +225,14 @@ pub struct MintTokens<'info> {
     #[account(mut)]
     pub destination_ata: Account<'info, TokenAccount>,
     #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
-    pub palace: Account<'info, Palace>,
+    pub palace: Account<'info, PlayerPalace>,
     pub token_program: Program<'info, Token>,
+}
+
+#[error_code]
+pub enum ErrorCodes {
+    #[msg("Merchant item not found")]
+    MerchantItemNotFound,
+    #[msg("Not enough gold")]
+    NotEnoughGold,
 }

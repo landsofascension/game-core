@@ -26,46 +26,58 @@ describe("game-core", () => {
 
   const program = anchor.workspace.GameCore as Program<GameCore>
 
-  it("Can initialize the palace", async () => {
+  it("The player can sign up their account to initialize all core accounts", async () => {
     // get palace PDA
     const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("palace"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
-    console.log(palaceAddress.toString())
+    // get player PDA
+    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player"), program.provider.publicKey.toBytes()],
+      anchor.workspace.GameCore.programId
+    )[0]
+
     // Add your test here.
     const tx = await program.methods
       .initialize()
       .accounts({
         palace: palaceAddress,
+        player: playerAddress,
       })
       .rpc()
-    console.log("Your transaction signature", tx)
 
     // fetch the palace account
-    const palace = await program.account.palace.fetch(palaceAddress)
-    console.log(palace)
+    const palace = await program.account.playerPalace.fetch(palaceAddress)
+
+    // fetch the player account
+    const player = await program.account.player.fetch(playerAddress)
+
+    expect(palace.level).to.be.eq(1)
+    expect(player.lumber.eq(new anchor.BN(0))).to.be.true
   })
 
-  it("Can create a token mint", async () => {
+  it("The program can create a token mint", async () => {
     // get palace PDA
     const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint")],
       anchor.workspace.GameCore.programId
     )[0]
 
-    const tx = await program.methods
+    await program.methods
       .createTokenMint()
       .accounts({
         mint: mintAddress,
       })
       .rpc()
 
-    console.log("Your transaction signature", tx)
+    const mint = await program.provider.connection.getAccountInfo(mintAddress)
+
+    expect(mint).to.not.be.null
   })
 
-  it("Can collect tokens", async () => {
+  it("The player can collect tokens", async () => {
     // get palace PDA
     const mint = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint")],
@@ -91,7 +103,7 @@ describe("game-core", () => {
 
     ixs.push(
       await program.methods
-        .mintTokens()
+        .collectTokens()
         .accounts({
           mint,
           destinationAta: ata,
@@ -130,7 +142,7 @@ describe("game-core", () => {
     expect(newBalance).to.be.greaterThan(previousBalance)
   })
 
-  it("Can upgrade the palace", async () => {
+  it("The player can upgrade the palace", async () => {
     // get palace PDA
     const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("palace"), program.provider.publicKey.toBytes()],
@@ -144,8 +156,9 @@ describe("game-core", () => {
 
     const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
 
-    const previousLevel = (await program.account.palace.fetch(palaceAddress))
-      .level
+    const previousLevel = (
+      await program.account.playerPalace.fetch(palaceAddress)
+    ).level
 
     const txid = await program.methods
       .upgradePalace()
@@ -159,8 +172,26 @@ describe("game-core", () => {
     await program.provider.connection.confirmTransaction(txid)
 
     // fetch the palace account
-    const palace = await program.account.palace.fetch(palaceAddress)
+    const palace = await program.account.playerPalace.fetch(palaceAddress)
 
     expect(palace.level).to.be.greaterThan(previousLevel)
+  })
+
+  it("The player can purchase merchant items", async () => {
+    // get player PDA
+    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player"), program.provider.publicKey.toBytes()],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    const tx = await program.methods
+      .purchaseMerchantItem("Lumberjack")
+      .accounts({})
+      .rpc()
+  })
+
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    console.info("⏳ waiting 1s for tx to be confirmed")
   })
 })
