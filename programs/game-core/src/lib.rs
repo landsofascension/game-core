@@ -25,8 +25,8 @@ pub struct PlayerMerchant {
     pub level: u32,
 }
 
-const MERCHANT_ITEMS: [&str; 1] = ["Lumberjack"];
-const MERCHANT_ITEMS_COST: [u64; 1] = [1000];
+const MERCHANT_ITEMS: [&str; 2] = ["Lumberjack", "Miner"];
+const MERCHANT_ITEMS_COST: [u64; 2] = [1000, 500];
 
 #[program]
 pub mod game_core {
@@ -79,7 +79,13 @@ pub mod game_core {
                     "Lumberjack" => {
                         ctx.accounts.player.lumberjacks = ctx.accounts.player.lumberjacks + 1;
                     }
-                    _ => {}
+                    "Miner" => {
+                        ctx.accounts.player.miners = ctx.accounts.player.miners + 1;
+                    }
+                    // item configured but not implemented
+                    _ => {
+                        return err!(ErrorCodes::MerchantItemNotFound);
+                    }
                 }
 
                 // burn tokens
@@ -100,20 +106,22 @@ pub mod game_core {
     }
 
     pub fn upgrade_palace(ctx: Context<Upgrade>) -> Result<()> {
-        let token_program = &ctx.accounts.token_program;
-        let authority = &ctx.accounts.signer;
-
-        let cpi_accounts = Burn {
-            mint: ctx.accounts.mint.to_account_info().clone(),
-            from: ctx.accounts.from_ata.to_account_info().clone(),
-            authority: authority.to_account_info().clone(),
-        };
-
         // Cost for upgrade based on Palace level
-        let cost = (ctx.accounts.palace.level as u64) * 1000;
+        let cost_gold = (ctx.accounts.palace.level as u64) * 1000;
+        let cost_lumber = (ctx.accounts.palace.level as u64) * 100;
 
-        // Burn tokens
-        burn(CpiContext::new(token_program.to_account_info(), cpi_accounts), cost)?;
+        // Check if player has enough gold
+        if ctx.accounts.player.gold < cost_gold {
+            return err!(ErrorCodes::NotEnoughGold);
+        }
+
+        // Check if player has enough lumber
+        if ctx.accounts.player.lumber < cost_lumber {
+            return err!(ErrorCodes::NotEnoughLumber);
+        }
+
+        ctx.accounts.player.gold = ctx.accounts.player.gold - cost_gold;
+        ctx.accounts.player.lumber = ctx.accounts.player.gold - cost_lumber;
 
         // Upgrade palace
         ctx.accounts.palace.level = ctx.accounts.palace.level + 1;
@@ -214,11 +222,8 @@ pub struct Upgrade<'info> {
     pub palace: Account<'info, PlayerPalace>,
     #[account(mut)]
     pub signer: Signer<'info>,
-    #[account(mut)]
-    pub from_ata: Account<'info, TokenAccount>,
-    #[account(mut, seeds = [b"mint".as_ref()], bump)]
-    pub mint: Account<'info, Mint>,
-    pub token_program: Program<'info, Token>,
+    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    pub player: Account<'info, Player>,
     pub system_program: Program<'info, System>,
 }
 
@@ -258,4 +263,6 @@ pub enum ErrorCodes {
     MerchantItemNotFound,
     #[msg("Not enough gold")]
     NotEnoughGold,
+    #[msg("Not enough lumber")]
+    NotEnoughLumber,
 }

@@ -142,7 +142,7 @@ describe("game-core", () => {
     expect(newBalance).to.be.greaterThan(previousBalance)
   })
 
-  it("The player can purchase merchant items using tokens", async () => {
+  it("The player can hire lumberjacks and miners using tokens", async () => {
     // get player PDA
     const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("player"), program.provider.publicKey.toBytes()],
@@ -156,24 +156,42 @@ describe("game-core", () => {
 
     const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
 
-    const previousBalance = Number(
+    let previousBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(ata)).value
         .amount
     )
 
+    // Purchase a lumberjack
     await program.methods
       .purchaseMerchantItem("Lumberjack")
       .accounts({ fromAta: ata })
       .rpc()
 
     // fetch the player account
-    const player = await program.account.player.fetch(playerAddress)
-    const newBalance = Number(
+    let player = await program.account.player.fetch(playerAddress)
+    let newBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(ata)).value
         .amount
     )
 
     expect(player.lumberjacks.gt(new anchor.BN(0))).to.be.true
+    expect(previousBalance).to.be.greaterThan(newBalance)
+
+    previousBalance = newBalance
+    // Purchase a miner
+    await program.methods
+      .purchaseMerchantItem("Miner")
+      .accounts({ fromAta: ata })
+      .rpc()
+
+    // fetch the player account
+    player = await program.account.player.fetch(playerAddress)
+    newBalance = Number(
+      (await program.provider.connection.getTokenAccountBalance(ata)).value
+        .amount
+    )
+
+    expect(player.miners.gt(new anchor.BN(0))).to.be.true
     expect(previousBalance).to.be.greaterThan(newBalance)
   })
 
@@ -184,25 +202,20 @@ describe("game-core", () => {
       anchor.workspace.GameCore.programId
     )[0]
 
-    const mint = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
+    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
-
-    const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
 
     const previousLevel = (
       await program.account.playerPalace.fetch(palaceAddress)
     ).level
 
-    const txid = await program.methods
-      .upgradePalace()
-      .accounts({
-        palace: palaceAddress,
-        fromAta: ata,
-        mint,
-      })
-      .rpc()
+    const previousPlayerAccount = await program.account.player.fetch(
+      playerAddress
+    )
+
+    const txid = await program.methods.upgradePalace().accounts({}).rpc()
 
     await program.provider.connection.confirmTransaction(txid)
 
@@ -210,6 +223,11 @@ describe("game-core", () => {
     const palace = await program.account.playerPalace.fetch(palaceAddress)
 
     expect(palace.level).to.be.greaterThan(previousLevel)
+
+    const newPlayerAccount = await program.account.player.fetch(playerAddress)
+
+    expect(previousPlayerAccount.lumber.gt(newPlayerAccount.lumber)).to.be.true
+    expect(previousPlayerAccount.gold.gt(newPlayerAccount.gold)).to.be.true
   })
 
   afterEach(async () => {
