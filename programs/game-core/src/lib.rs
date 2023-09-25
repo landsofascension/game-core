@@ -60,7 +60,11 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn purchase_merchant_item(ctx: Context<PurchaseMerchantItem>, item: String) -> Result<()> {
+    pub fn purchase_merchant_item(
+        ctx: Context<PurchaseMerchantItem>,
+        item: String,
+        amount: u64
+    ) -> Result<()> {
         let found = MERCHANT_ITEMS.iter().position(|&i| i == item);
 
         match found {
@@ -77,10 +81,11 @@ pub mod game_core {
                 // add item
                 match item {
                     "Lumberjack" => {
-                        ctx.accounts.player.lumberjacks = ctx.accounts.player.lumberjacks + 1;
+                        ctx.accounts.player.lumberjacks =
+                            ctx.accounts.player.lumberjacks + 1 * amount;
                     }
                     "Miner" => {
-                        ctx.accounts.player.miners = ctx.accounts.player.miners + 1;
+                        ctx.accounts.player.miners = ctx.accounts.player.miners + 1 * amount;
                     }
                     // item configured but not implemented
                     _ => {
@@ -166,6 +171,13 @@ pub mod game_core {
 
         Ok(())
     }
+
+    pub fn collect_resources(ctx: Context<CollectResources>) -> Result<()> {
+        ctx.accounts.player.gold = ctx.accounts.player.gold + ctx.accounts.player.miners * 10;
+        ctx.accounts.player.lumber =
+            ctx.accounts.player.lumber + ctx.accounts.player.lumberjacks * 10;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -213,6 +225,15 @@ pub struct PurchaseMerchantItem<'info> {
     #[account(mut, token::mint = mint)]
     pub from_ata: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CollectResources<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    pub player: Account<'info, Player>,
     pub system_program: Program<'info, System>,
 }
 

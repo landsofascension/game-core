@@ -161,9 +161,10 @@ describe("game-core", () => {
         .amount
     )
 
+    const amountToHire = new anchor.BN(1000)
     // Purchase a lumberjack
     await program.methods
-      .purchaseMerchantItem("Lumberjack")
+      .purchaseMerchantItem("Lumberjack", amountToHire)
       .accounts({ fromAta: ata })
       .rpc()
 
@@ -174,13 +175,13 @@ describe("game-core", () => {
         .amount
     )
 
-    expect(player.lumberjacks.gt(new anchor.BN(0))).to.be.true
+    expect(player.lumberjacks.eq(amountToHire)).to.be.true
     expect(previousBalance).to.be.greaterThan(newBalance)
 
     previousBalance = newBalance
     // Purchase a miner
     await program.methods
-      .purchaseMerchantItem("Miner")
+      .purchaseMerchantItem("Miner", amountToHire)
       .accounts({ fromAta: ata })
       .rpc()
 
@@ -191,8 +192,27 @@ describe("game-core", () => {
         .amount
     )
 
-    expect(player.miners.gt(new anchor.BN(0))).to.be.true
+    expect(player.miners.eq(amountToHire)).to.be.true
     expect(previousBalance).to.be.greaterThan(newBalance)
+  })
+
+  it('The player can collect lumber and gold from their "workers"', async () => {
+    // get player PDA
+    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player"), program.provider.publicKey.toBytes()],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    // fetch the player account
+    const player = await program.account.player.fetch(playerAddress)
+
+    await program.methods.collectResources().accounts({}).rpc()
+
+    // fetch the player account
+    const newPlayer = await program.account.player.fetch(playerAddress)
+
+    expect(newPlayer.lumber.gt(player.lumber)).to.be.true
+    expect(newPlayer.gold.gt(player.gold)).to.be.true
   })
 
   it("The player can upgrade the palace", async () => {
