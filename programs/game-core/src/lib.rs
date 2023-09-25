@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-
 use anchor_lang::prelude::*;
-
 use anchor_spl::token::{ Token, Mint, MintTo, mint_to, TokenAccount, burn };
 
 declare_id!("9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf");
@@ -11,15 +8,19 @@ pub struct Player {
     pub experience: u64,
     pub gold: u64,
     pub lumber: u64,
+    pub miners: u64,
+    pub lumberjacks: u64,
 }
 
 #[account]
+// This is attached to the player account because each palace has its own level
 pub struct PlayerPalace {
     pub level: u32,
     pub last_mint_timestamp: i64,
 }
 
 #[account]
+// This is attached to the player account because each merchant has its own level
 pub struct PlayerMerchant {
     pub level: u32,
 }
@@ -42,6 +43,8 @@ pub mod game_core {
             experience: 0,
             gold: 0,
             lumber: 0,
+            miners: 0,
+            lumberjacks: 0,
         });
 
         // init buildings
@@ -71,10 +74,25 @@ pub mod game_core {
                 msg!("purchasing item: {}", item);
                 msg!("cost: {}", cost);
 
-                // check if player has enough gold
-                if ctx.accounts.player.gold < cost {
-                    return Err(ErrorCodes::NotEnoughGold.into());
+                // add item
+                match item {
+                    "Lumberjack" => {
+                        ctx.accounts.player.lumberjacks = ctx.accounts.player.lumberjacks + 1;
+                    }
+                    _ => {}
                 }
+
+                // burn tokens
+                let token_program = &ctx.accounts.token_program;
+                let authority = &ctx.accounts.signer;
+
+                let cpi_accounts = Burn {
+                    mint: ctx.accounts.mint.to_account_info().clone(),
+                    from: ctx.accounts.from_ata.to_account_info().clone(),
+                    authority: authority.to_account_info().clone(),
+                };
+
+                burn(CpiContext::new(token_program.to_account_info(), cpi_accounts), cost)?;
             }
         }
 
@@ -147,7 +165,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 8 * 4, // 4 fields of 8 bytes each
+        space = 8 + 8 * 5, // 4 fields of 8 bytes each
         seeds = [b"player".as_ref(), signer.key().as_ref()],
         bump
     )]
@@ -182,6 +200,11 @@ pub struct PurchaseMerchantItem<'info> {
     pub merchant: Account<'info, PlayerMerchant>,
     #[account(mut)]
     pub signer: Signer<'info>,
+    #[account(mut, seeds = [b"mint".as_ref()], bump)]
+    pub mint: Account<'info, Mint>,
+    #[account(mut, token::mint = mint)]
+    pub from_ata: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
