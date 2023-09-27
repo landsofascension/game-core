@@ -6,6 +6,12 @@ import {
   getAssociatedTokenAddress,
 } from "@solana/spl-token"
 import { expect } from "chai"
+import {
+  getCollectTokensInstructions,
+  getCreateTokenMintInstructions,
+  getInitializeInstructions,
+  getPurchaseMerchantItemInstructions,
+} from "../src"
 
 if (!process.env.ANCHOR_WALLET || process.env.ANCHOR_WALLET === "") {
   throw new Error("expected environment variable `ANCHOR_WALLET` is not set.")
@@ -27,26 +33,12 @@ describe("game-core", () => {
   const program = anchor.workspace.GameCore as Program<GameCore>
 
   it("The player can sign up their account to initialize all core accounts", async () => {
-    // get palace PDA
-    const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("palace"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
+    const { instructions, palaceAddress, playerAddress } =
+      await getInitializeInstructions(program, payer.publicKey)
 
-    // get player PDA
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    // Add your test here.
-    const tx = await program.methods
-      .initialize()
-      .accounts({
-        palace: palaceAddress,
-        player: playerAddress,
-      })
-      .rpc()
+    await program.provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(...instructions)
+    )
 
     // fetch the palace account
     const palace = await program.account.playerPalace.fetch(palaceAddress)
@@ -59,18 +51,13 @@ describe("game-core", () => {
   })
 
   it("The program can create a token mint", async () => {
-    // get palace PDA
-    const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
-      anchor.workspace.GameCore.programId
-    )[0]
+    const { instructions, mintAddress } = await getCreateTokenMintInstructions(
+      program
+    )
 
-    await program.methods
-      .createTokenMint()
-      .accounts({
-        mint: mintAddress,
-      })
-      .rpc()
+    await program.provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(...instructions)
+    )
 
     const mint = await program.provider.connection.getAccountInfo(mintAddress)
 
@@ -79,48 +66,10 @@ describe("game-core", () => {
 
   it("The player can collect tokens", async () => {
     // get palace PDA
-    const mint = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    const destination = payer.publicKey
-    const ata = await getAssociatedTokenAddress(mint, destination)
-    const account = await program.provider.connection.getAccountInfo(ata)
-
-    const ixs = []
-    // create associated token account if it doesn't exist
-    if (!account) {
-      ixs.push(
-        createAssociatedTokenAccountInstruction(
-          program.provider.publicKey,
-          ata,
-          destination,
-          mint
-        )
-      )
-    }
-
-    ixs.push(
-      await program.methods
-        .collectTokens()
-        .accounts({
-          mint,
-          destinationAta: ata,
-        })
-        .instruction()
+    const { account, ata, instructions } = await getCollectTokensInstructions(
+      program,
+      payer.publicKey
     )
-
-    const message = new anchor.web3.TransactionMessage({
-      instructions: ixs,
-      payerKey: program.provider.publicKey,
-      recentBlockhash: (await program.provider.connection.getRecentBlockhash())
-        .blockhash,
-    }).compileToV0Message()
-
-    const tx = new anchor.web3.VersionedTransaction(message)
-
-    tx.sign([payer])
 
     let previousBalance = 0
 
@@ -131,9 +80,10 @@ describe("game-core", () => {
       )
     }
 
-    const txid = await program.provider.connection.sendTransaction(tx)
+    await program.provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(...instructions)
+    )
 
-    await program.provider.connection.confirmTransaction(txid)
     const newBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(ata)).value
         .amount
@@ -144,29 +94,25 @@ describe("game-core", () => {
 
   it("The player can hire lumberjacks and miners using tokens", async () => {
     // get player PDA
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
 
-    const mint = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
-      anchor.workspace.GameCore.programId
-    )[0]
+    const amountToHire = new anchor.BN(1000)
 
-    const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
+    const { ata, instructions, playerAddress } =
+      await getPurchaseMerchantItemInstructions(
+        program,
+        payer.publicKey,
+        "Lumberjack",
+        amountToHire
+      )
 
     let previousBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(ata)).value
         .amount
     )
 
-    const amountToHire = new anchor.BN(1000)
-    // Purchase a lumberjack
-    await program.methods
-      .purchaseMerchantItem("Lumberjack", amountToHire)
-      .accounts({ fromAta: ata })
-      .rpc()
+    await program.provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(...instructions)
+    )
 
     // fetch the player account
     let player = await program.account.player.fetch(playerAddress)
@@ -180,10 +126,16 @@ describe("game-core", () => {
 
     previousBalance = newBalance
     // Purchase a miner
-    await program.methods
-      .purchaseMerchantItem("Miner", amountToHire)
-      .accounts({ fromAta: ata })
-      .rpc()
+    const { instructions: ixs2 } = await getPurchaseMerchantItemInstructions(
+      program,
+      payer.publicKey,
+      "Miner",
+      amountToHire
+    )
+
+    await program.provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(...ixs2)
+    )
 
     // fetch the player account
     player = await program.account.player.fetch(playerAddress)
