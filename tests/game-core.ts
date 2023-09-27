@@ -251,7 +251,7 @@ describe("game-core", () => {
   })
 
   afterEach(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    console.info("⏳ waiting 1s for tx to be confirmed")
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    console.info("⏳ waiting 100ms for tx to be confirmed")
   })
 })

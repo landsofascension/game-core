@@ -126,7 +126,7 @@ pub mod game_core {
         }
 
         ctx.accounts.player.gold = ctx.accounts.player.gold - cost_gold;
-        ctx.accounts.player.lumber = ctx.accounts.player.gold - cost_lumber;
+        ctx.accounts.player.lumber = ctx.accounts.player.lumber - cost_lumber;
 
         // Upgrade palace
         ctx.accounts.palace.level = ctx.accounts.palace.level + 1;
@@ -165,8 +165,8 @@ pub mod game_core {
 
         // update the palace
         ctx.accounts.palace.set_inner(PlayerPalace {
-            level: 1,
             last_mint_timestamp: ts_now,
+            ..ctx.accounts.palace.clone().into_inner()
         });
 
         Ok(())
