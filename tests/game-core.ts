@@ -26,6 +26,25 @@ describe("game-core", () => {
 
   const program = anchor.workspace.GameCore as Program<GameCore>
 
+  it("The program can create a token mint", async () => {
+    // get palace PDA
+    const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("mint")],
+      anchor.workspace.GameCore.programId
+    )[0]
+
+    await program.methods
+      .createTokenMint()
+      .accounts({
+        mint: mintAddress,
+      })
+      .rpc()
+
+    const mint = await program.provider.connection.getAccountInfo(mintAddress)
+
+    expect(mint).to.not.be.null
+  })
+
   it("The player can sign up their account to initialize all core accounts", async () => {
     // get palace PDA
     const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
@@ -58,61 +77,22 @@ describe("game-core", () => {
     expect(player.lumber.eq(new anchor.BN(0))).to.be.true
   })
 
-  it("The program can create a token mint", async () => {
+  it("Tokens can be collected to the player vault", async () => {
     // get palace PDA
-    const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
+    const ata = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player_vault"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
-    await program.methods
-      .createTokenMint()
+    const ix = await program.methods
+      .collectTokens()
       .accounts({
-        mint: mintAddress,
+        owner: program.provider.publicKey,
       })
-      .rpc()
-
-    const mint = await program.provider.connection.getAccountInfo(mintAddress)
-
-    expect(mint).to.not.be.null
-  })
-
-  it("The player can collect tokens", async () => {
-    // get palace PDA
-    const mint = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    const destination = payer.publicKey
-    const ata = await getAssociatedTokenAddress(mint, destination)
-    const account = await program.provider.connection.getAccountInfo(ata)
-
-    const ixs = []
-    // create associated token account if it doesn't exist
-    if (!account) {
-      ixs.push(
-        createAssociatedTokenAccountInstruction(
-          program.provider.publicKey,
-          ata,
-          destination,
-          mint
-        )
-      )
-    }
-
-    ixs.push(
-      await program.methods
-        .collectTokens()
-        .accounts({
-          mint,
-          destinationAta: ata,
-        })
-        .instruction()
-    )
+      .instruction()
 
     const message = new anchor.web3.TransactionMessage({
-      instructions: ixs,
+      instructions: [ix],
       payerKey: program.provider.publicKey,
       recentBlockhash: (await program.provider.connection.getRecentBlockhash())
         .blockhash,
@@ -123,13 +103,6 @@ describe("game-core", () => {
     tx.sign([payer])
 
     let previousBalance = 0
-
-    if (account) {
-      previousBalance = Number(
-        (await program.provider.connection.getTokenAccountBalance(ata)).value
-          .amount
-      )
-    }
 
     const txid = await program.provider.connection.sendTransaction(tx)
 
@@ -142,37 +115,35 @@ describe("game-core", () => {
     expect(newBalance).to.be.greaterThan(previousBalance)
   })
 
-  it("The player can hire lumberjacks and miners using tokens", async () => {
+  it("The player vault can be used to hire lumberjacks and miners using tokens", async () => {
     // get player PDA
     const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("player"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
-    const mint = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("mint")],
+    const playerVault = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("player_vault"), program.provider.publicKey.toBytes()],
       anchor.workspace.GameCore.programId
     )[0]
 
-    const ata = await getAssociatedTokenAddress(mint, payer.publicKey)
-
     let previousBalance = Number(
-      (await program.provider.connection.getTokenAccountBalance(ata)).value
-        .amount
+      (await program.provider.connection.getTokenAccountBalance(playerVault))
+        .value.amount
     )
 
     const amountToHire = new anchor.BN(1000)
     // Purchase a lumberjack
     await program.methods
       .purchaseMerchantItem("Lumberjack", amountToHire)
-      .accounts({ fromAta: ata })
+      .accounts({ owner: program.provider.publicKey })
       .rpc()
 
     // fetch the player account
     let player = await program.account.player.fetch(playerAddress)
     let newBalance = Number(
-      (await program.provider.connection.getTokenAccountBalance(ata)).value
-        .amount
+      (await program.provider.connection.getTokenAccountBalance(playerVault))
+        .value.amount
     )
 
     expect(player.lumberjacks.eq(amountToHire)).to.be.true
@@ -182,14 +153,14 @@ describe("game-core", () => {
     // Purchase a miner
     await program.methods
       .purchaseMerchantItem("Miner", amountToHire)
-      .accounts({ fromAta: ata })
+      .accounts({ owner: program.provider.publicKey })
       .rpc()
 
     // fetch the player account
     player = await program.account.player.fetch(playerAddress)
     newBalance = Number(
-      (await program.provider.connection.getTokenAccountBalance(ata)).value
-        .amount
+      (await program.provider.connection.getTokenAccountBalance(playerVault))
+        .value.amount
     )
 
     expect(player.miners.eq(amountToHire)).to.be.true
@@ -206,7 +177,10 @@ describe("game-core", () => {
     // fetch the player account
     const player = await program.account.player.fetch(playerAddress)
 
-    await program.methods.collectResources().accounts({}).rpc()
+    await program.methods
+      .collectResources()
+      .accounts({ owner: program.provider.publicKey })
+      .rpc()
 
     // fetch the player account
     const newPlayer = await program.account.player.fetch(playerAddress)
@@ -235,7 +209,10 @@ describe("game-core", () => {
       playerAddress
     )
 
-    const txid = await program.methods.upgradePalace().accounts({}).rpc()
+    const txid = await program.methods
+      .upgradePalace()
+      .accounts({ owner: program.provider.publicKey })
+      .rpc()
 
     await program.provider.connection.confirmTransaction(txid)
 
@@ -252,6 +229,5 @@ describe("game-core", () => {
 
   afterEach(async () => {
     await new Promise((resolve) => setTimeout(resolve, 100))
-    console.info("⏳ waiting 100ms for tx to be confirmed")
   })
 })

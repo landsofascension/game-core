@@ -93,17 +93,34 @@ pub mod game_core {
                     }
                 }
 
-                // burn tokens
+                // burn tokens from player vault
                 let token_program = &ctx.accounts.token_program;
-                let authority = &ctx.accounts.signer;
+                let authority = &ctx.accounts.mint;
 
                 let cpi_accounts = Burn {
                     mint: ctx.accounts.mint.to_account_info().clone(),
-                    from: ctx.accounts.from_ata.to_account_info().clone(),
+                    from: ctx.accounts.player_vault.to_account_info().clone(),
                     authority: authority.to_account_info().clone(),
                 };
 
-                burn(CpiContext::new(token_program.to_account_info(), cpi_accounts), cost)?;
+                let bump = *ctx.bumps.get("mint").unwrap();
+
+                let result = burn(
+                    CpiContext::new_with_signer(
+                        token_program.to_account_info(),
+                        cpi_accounts,
+                        &[&[b"mint", &[bump]]]
+                    ),
+                    cost
+                );
+
+                match result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        msg!("error burning tokens: {:?}", e);
+                        return err!(ErrorCodes::CouldNotBurnTokens);
+                    }
+                }
             }
         }
 
@@ -143,7 +160,7 @@ pub mod game_core {
 
         let mint_to_accounts = MintTo {
             mint: ctx.accounts.mint.to_account_info(),
-            to: ctx.accounts.destination_ata.to_account_info(),
+            to: ctx.accounts.player_vault.to_account_info(),
             authority: ctx.accounts.mint.to_account_info(),
         };
         let bump = *ctx.bumps.get("mint").unwrap();
@@ -173,6 +190,7 @@ pub mod game_core {
     }
 
     pub fn collect_resources(ctx: Context<CollectResources>) -> Result<()> {
+        // @TODO use timestamp to calculate how much resources to add
         ctx.accounts.player.gold = ctx.accounts.player.gold + ctx.accounts.player.miners * 10;
         ctx.accounts.player.lumber =
             ctx.accounts.player.lumber + ctx.accounts.player.lumberjacks * 10;
@@ -193,6 +211,15 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
+        seeds = [b"player_vault".as_ref(), signer.key().as_ref()],
+        bump,
+        token::mint = mint,
+        token::authority = mint
+    )]
+    pub player_vault: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = signer,
         space = 8 + 8 * 4, // 4 fields of 8 bytes each
         seeds = [b"palace".as_ref(), signer.key().as_ref()],
         bump
@@ -206,24 +233,55 @@ pub struct Initialize<'info> {
         bump
     )]
     pub merchant: Account<'info, PlayerMerchant>,
+    #[account(mut, seeds = [b"mint".as_ref()], bump)]
+    pub mint: Account<'info, Mint>,
 
     #[account(mut)]
     pub signer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CollectTokens<'info> {
+    #[account(mut)]
+    /// CHECK: only to grab the PDA
+    pub owner: AccountInfo<'info>,
+    #[account(mut, seeds = [b"mint".as_ref()], bump)]
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [b"player_vault".as_ref(), owner.key().as_ref()],
+        bump,
+        token::mint = mint,
+        token::authority = mint
+    )]
+    pub player_vault: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"palace".as_ref(), owner.key().as_ref()], bump)]
+    pub palace: Account<'info, PlayerPalace>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
 pub struct PurchaseMerchantItem<'info> {
-    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
-    #[account(mut, seeds = [b"merchant".as_ref(), signer.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"merchant".as_ref(), owner.key().as_ref()], bump)]
     pub merchant: Account<'info, PlayerMerchant>,
+    #[account(
+        mut,
+        seeds = [b"player_vault".as_ref(), owner.key().as_ref()],
+        bump,
+        token::mint = mint,
+        token::authority = mint
+    )]
+    pub player_vault: Account<'info, TokenAccount>,
     #[account(mut)]
-    pub signer: Signer<'info>,
+    /// CHECK: only to grab the PDA
+    pub owner: AccountInfo<'info>,
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
     pub mint: Account<'info, Mint>,
-    #[account(mut, token::mint = mint)]
-    pub from_ata: Account<'info, TokenAccount>,
+
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -231,19 +289,21 @@ pub struct PurchaseMerchantItem<'info> {
 #[derive(Accounts)]
 pub struct CollectResources<'info> {
     #[account(mut)]
-    pub signer: Signer<'info>,
-    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    /// CHECK: only to grab the PDA
+    pub owner: AccountInfo<'info>,
+    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct Upgrade<'info> {
-    #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"palace".as_ref(), owner.key().as_ref()], bump)]
     pub palace: Account<'info, PlayerPalace>,
     #[account(mut)]
-    pub signer: Signer<'info>,
-    #[account(mut, seeds = [b"player".as_ref(), signer.key().as_ref()], bump)]
+    /// CHECK: only to grab the PDA
+    pub owner: AccountInfo<'info>,
+    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
     pub system_program: Program<'info, System>,
 }
@@ -265,19 +325,6 @@ pub struct CreateTokenMint<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct CollectTokens<'info> {
-    #[account(mut)]
-    pub signer: Signer<'info>,
-    #[account(mut, seeds = [b"mint".as_ref()], bump)]
-    pub mint: Account<'info, Mint>,
-    #[account(mut)]
-    pub destination_ata: Account<'info, TokenAccount>,
-    #[account(mut, seeds = [b"palace".as_ref(), signer.key().as_ref()], bump)]
-    pub palace: Account<'info, PlayerPalace>,
-    pub token_program: Program<'info, Token>,
-}
-
 #[error_code]
 pub enum ErrorCodes {
     #[msg("Merchant item not found")]
@@ -286,4 +333,6 @@ pub enum ErrorCodes {
     NotEnoughGold,
     #[msg("Not enough lumber")]
     NotEnoughLumber,
+    #[msg("Could not burn tokens")]
+    CouldNotBurnTokens,
 }
