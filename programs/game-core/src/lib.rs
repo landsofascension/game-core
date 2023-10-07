@@ -13,14 +13,14 @@ pub struct Player {
 }
 
 #[account]
-// This is attached to the player account because each palace has its own level
+// This is attached to the player account because each player_palace has its own level
 pub struct PlayerPalace {
     pub level: u32,
     pub last_mint_timestamp: i64,
 }
 
 #[account]
-// This is attached to the player account because each merchant has its own level
+// This is attached to the player account because each player_merchant has its own level
 pub struct PlayerMerchant {
     pub level: u32,
 }
@@ -34,7 +34,7 @@ pub mod game_core {
 
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+    pub fn sign_up_player(ctx: Context<SignUpPlayer>) -> Result<()> {
         let clock = Clock::get()?;
         let ts_now = clock.unix_timestamp;
 
@@ -48,12 +48,12 @@ pub mod game_core {
         });
 
         // init buildings
-        ctx.accounts.palace.set_inner(PlayerPalace {
+        ctx.accounts.player_palace.set_inner(PlayerPalace {
             level: 1,
             last_mint_timestamp: ts_now,
         });
 
-        ctx.accounts.merchant.set_inner(PlayerMerchant {
+        ctx.accounts.player_merchant.set_inner(PlayerMerchant {
             level: 0,
         });
 
@@ -127,10 +127,10 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn upgrade_palace(ctx: Context<Upgrade>) -> Result<()> {
+    pub fn upgrade_player_palace(ctx: Context<UpgradePlayerPalace>) -> Result<()> {
         // Cost for upgrade based on Palace level
-        let cost_gold = (ctx.accounts.palace.level as u64) * 1000;
-        let cost_lumber = (ctx.accounts.palace.level as u64) * 100;
+        let cost_gold = (ctx.accounts.player_palace.level as u64) * 1000;
+        let cost_lumber = (ctx.accounts.player_palace.level as u64) * 100;
 
         // Check if player has enough gold
         if ctx.accounts.player.gold < cost_gold {
@@ -145,8 +145,8 @@ pub mod game_core {
         ctx.accounts.player.gold = ctx.accounts.player.gold - cost_gold;
         ctx.accounts.player.lumber = ctx.accounts.player.lumber - cost_lumber;
 
-        // Upgrade palace
-        ctx.accounts.palace.level = ctx.accounts.palace.level + 1;
+        // Upgrade player_palace
+        ctx.accounts.player_palace.level = ctx.accounts.player_palace.level + 1;
 
         Ok(())
     }
@@ -155,7 +155,7 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn collect_tokens(ctx: Context<CollectTokens>) -> Result<()> {
+    pub fn collect_palace_tokens(ctx: Context<CollectPalaceTokens>) -> Result<()> {
         let token_program = ctx.accounts.token_program.to_account_info();
 
         let mint_to_accounts = MintTo {
@@ -163,33 +163,38 @@ pub mod game_core {
             to: ctx.accounts.player_vault.to_account_info(),
             authority: ctx.accounts.mint.to_account_info(),
         };
-        let bump = *ctx.bumps.get("mint").unwrap();
 
         let clock = Clock::get()?;
         let ts_now = clock.unix_timestamp;
 
         // 1 token per second
-        let seconds_elapsed = ts_now - ctx.accounts.palace.last_mint_timestamp;
+        let seconds_elapsed = ts_now - ctx.accounts.player_palace.last_mint_timestamp;
         let amount = (seconds_elapsed * 10000) as u64;
+
+        let mint_bump = *ctx.bumps.get("mint").unwrap();
 
         msg!("minting {} tokens", amount);
 
         // mint tokens
         mint_to(
-            CpiContext::new_with_signer(token_program, mint_to_accounts, &[&[b"mint", &[bump]]]),
+            CpiContext::new_with_signer(
+                token_program,
+                mint_to_accounts,
+                &[&[b"mint", &[mint_bump]]]
+            ),
             amount
         )?;
 
-        // update the palace
-        ctx.accounts.palace.set_inner(PlayerPalace {
+        // update the player_palace
+        ctx.accounts.player_palace.set_inner(PlayerPalace {
             last_mint_timestamp: ts_now,
-            ..ctx.accounts.palace.clone().into_inner()
+            ..ctx.accounts.player_palace.clone().into_inner()
         });
 
         Ok(())
     }
 
-    pub fn collect_resources(ctx: Context<CollectResources>) -> Result<()> {
+    pub fn collect_player_resources(ctx: Context<CollectPlayerResources>) -> Result<()> {
         // @TODO use timestamp to calculate how much resources to add
         ctx.accounts.player.gold = ctx.accounts.player.gold + ctx.accounts.player.miners * 10;
         ctx.accounts.player.lumber =
@@ -199,7 +204,7 @@ pub mod game_core {
 }
 
 #[derive(Accounts)]
-pub struct Initialize<'info> {
+pub struct SignUpPlayer<'info> {
     #[account(
         init,
         payer = signer,
@@ -221,18 +226,18 @@ pub struct Initialize<'info> {
         init,
         payer = signer,
         space = 8 + 8 * 4, // 4 fields of 8 bytes each
-        seeds = [b"palace".as_ref(), signer.key().as_ref()],
+        seeds = [b"player_palace".as_ref(), signer.key().as_ref()],
         bump
     )]
-    pub palace: Account<'info, PlayerPalace>,
+    pub player_palace: Account<'info, PlayerPalace>,
     #[account(
         init,
         payer = signer,
         space = 8 + 8 * 4, // 4 fields of 8 bytes each
-        seeds = [b"merchant".as_ref(), signer.key().as_ref()],
+        seeds = [b"player_merchant".as_ref(), signer.key().as_ref()],
         bump
     )]
-    pub merchant: Account<'info, PlayerMerchant>,
+    pub player_merchant: Account<'info, PlayerMerchant>,
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
     pub mint: Account<'info, Mint>,
 
@@ -243,8 +248,7 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
-pub struct CollectTokens<'info> {
-    #[account(mut)]
+pub struct CollectPalaceTokens<'info> {
     /// CHECK: only to grab the PDA
     pub owner: AccountInfo<'info>,
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
@@ -257,8 +261,8 @@ pub struct CollectTokens<'info> {
         token::authority = mint
     )]
     pub player_vault: Account<'info, TokenAccount>,
-    #[account(mut, seeds = [b"palace".as_ref(), owner.key().as_ref()], bump)]
-    pub palace: Account<'info, PlayerPalace>,
+    #[account(mut, seeds = [b"player_palace".as_ref(), owner.key().as_ref()], bump)]
+    pub player_palace: Account<'info, PlayerPalace>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -266,8 +270,8 @@ pub struct CollectTokens<'info> {
 pub struct PurchaseMerchantItem<'info> {
     #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
-    #[account(mut, seeds = [b"merchant".as_ref(), owner.key().as_ref()], bump)]
-    pub merchant: Account<'info, PlayerMerchant>,
+    #[account(mut, seeds = [b"player_merchant".as_ref(), owner.key().as_ref()], bump)]
+    pub player_merchant: Account<'info, PlayerMerchant>,
     #[account(
         mut,
         seeds = [b"player_vault".as_ref(), owner.key().as_ref()],
@@ -287,7 +291,7 @@ pub struct PurchaseMerchantItem<'info> {
 }
 
 #[derive(Accounts)]
-pub struct CollectResources<'info> {
+pub struct CollectPlayerResources<'info> {
     #[account(mut)]
     /// CHECK: only to grab the PDA
     pub owner: AccountInfo<'info>,
@@ -297,9 +301,9 @@ pub struct CollectResources<'info> {
 }
 
 #[derive(Accounts)]
-pub struct Upgrade<'info> {
-    #[account(mut, seeds = [b"palace".as_ref(), owner.key().as_ref()], bump)]
-    pub palace: Account<'info, PlayerPalace>,
+pub struct UpgradePlayerPalace<'info> {
+    #[account(mut, seeds = [b"player_palace".as_ref(), owner.key().as_ref()], bump)]
+    pub player_palace: Account<'info, PlayerPalace>,
     #[account(mut)]
     /// CHECK: only to grab the PDA
     pub owner: AccountInfo<'info>,
