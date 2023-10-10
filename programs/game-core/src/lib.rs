@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anchor_lang::prelude::*;
 use anchor_spl::token::{ Token, Mint, MintTo, mint_to, TokenAccount, burn };
 
@@ -5,6 +7,7 @@ declare_id!("9LqUvkM7zkVqpYypCRsuh5KitHbZZFrcfwkRVgirnnUf");
 
 #[account]
 pub struct Player {
+    pub username: String,
     pub experience: u64,
     pub gold: u64,
     pub lumber: u64,
@@ -34,12 +37,14 @@ pub mod game_core {
 
     use super::*;
 
-    pub fn sign_up_player(ctx: Context<SignUpPlayer>) -> Result<()> {
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
+    pub fn sign_up_player(ctx: Context<SignUpPlayer>, username: String) -> Result<()> {
         let clock = Clock::get()?;
         let ts_now = clock.unix_timestamp;
 
         // init player
         ctx.accounts.player.set_inner(Player {
+            username,
             experience: 0,
             gold: 0,
             lumber: 0,
@@ -60,6 +65,7 @@ pub mod game_core {
         Ok(())
     }
 
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
     pub fn purchase_merchant_item(
         ctx: Context<PurchaseMerchantItem>,
         item: String,
@@ -127,6 +133,7 @@ pub mod game_core {
         Ok(())
     }
 
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
     pub fn upgrade_player_palace(ctx: Context<UpgradePlayerPalace>) -> Result<()> {
         // Cost for upgrade based on Palace level
         let cost_gold = (ctx.accounts.player_palace.level as u64) * 1000;
@@ -151,10 +158,12 @@ pub mod game_core {
         Ok(())
     }
 
-    pub fn create_token_mint(_ctx: Context<CreateTokenMint>) -> Result<()> {
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
+    pub fn create_token_mint(ctx: Context<CreateTokenMint>) -> Result<()> {
         Ok(())
     }
 
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
     pub fn collect_palace_tokens(ctx: Context<CollectPalaceTokens>) -> Result<()> {
         let token_program = ctx.accounts.token_program.to_account_info();
 
@@ -194,6 +203,7 @@ pub mod game_core {
         Ok(())
     }
 
+    #[access_control(only_authority(&ctx.accounts.signer.key))]
     pub fn collect_player_resources(ctx: Context<CollectPlayerResources>) -> Result<()> {
         // @TODO use timestamp to calculate how much resources to add
         ctx.accounts.player.gold = ctx.accounts.player.gold + ctx.accounts.player.miners * 10;
@@ -204,19 +214,20 @@ pub mod game_core {
 }
 
 #[derive(Accounts)]
+#[instruction(username: String)]
 pub struct SignUpPlayer<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 8 * 5, // 4 fields of 8 bytes each
-        seeds = [b"player".as_ref(), signer.key().as_ref()],
+        space = 8 + 8 * 5 + 24, // 8(pubkey) + 8(u64 fields) * 5 + 24(string field)
+        seeds = [b"player".as_ref(), username.as_bytes().as_ref()],
         bump
     )]
     pub player: Account<'info, Player>,
     #[account(
         init,
         payer = signer,
-        seeds = [b"player_vault".as_ref(), signer.key().as_ref()],
+        seeds = [b"player_vault".as_ref(), player.key().as_ref()],
         bump,
         token::mint = mint,
         token::authority = mint
@@ -226,7 +237,7 @@ pub struct SignUpPlayer<'info> {
         init,
         payer = signer,
         space = 8 + 8 * 4, // 4 fields of 8 bytes each
-        seeds = [b"player_palace".as_ref(), signer.key().as_ref()],
+        seeds = [b"player_palace".as_ref(), player.key().as_ref()],
         bump
     )]
     pub player_palace: Account<'info, PlayerPalace>,
@@ -234,7 +245,7 @@ pub struct SignUpPlayer<'info> {
         init,
         payer = signer,
         space = 8 + 8 * 4, // 4 fields of 8 bytes each
-        seeds = [b"player_merchant".as_ref(), signer.key().as_ref()],
+        seeds = [b"player_merchant".as_ref(), player.key().as_ref()],
         bump
     )]
     pub player_merchant: Account<'info, PlayerMerchant>,
@@ -249,67 +260,67 @@ pub struct SignUpPlayer<'info> {
 
 #[derive(Accounts)]
 pub struct CollectPalaceTokens<'info> {
-    /// CHECK: only to grab the PDA
-    pub owner: AccountInfo<'info>,
+    #[account(mut)]
+    pub player: Account<'info, Player>,
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
     pub mint: Account<'info, Mint>,
     #[account(
         mut,
-        seeds = [b"player_vault".as_ref(), owner.key().as_ref()],
+        seeds = [b"player_vault".as_ref(), player.key().as_ref()],
         bump,
         token::mint = mint,
         token::authority = mint
     )]
     pub player_vault: Account<'info, TokenAccount>,
-    #[account(mut, seeds = [b"player_palace".as_ref(), owner.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"player_palace".as_ref(), player.key().as_ref()], bump)]
     pub player_palace: Account<'info, PlayerPalace>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct PurchaseMerchantItem<'info> {
-    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
+    #[account(mut)]
     pub player: Account<'info, Player>,
-    #[account(mut, seeds = [b"player_merchant".as_ref(), owner.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"player_merchant".as_ref(), player.key().as_ref()], bump)]
     pub player_merchant: Account<'info, PlayerMerchant>,
     #[account(
         mut,
-        seeds = [b"player_vault".as_ref(), owner.key().as_ref()],
+        seeds = [b"player_vault".as_ref(), player.key().as_ref()],
         bump,
         token::mint = mint,
         token::authority = mint
     )]
     pub player_vault: Account<'info, TokenAccount>,
-    #[account(mut)]
-    /// CHECK: only to grab the PDA
-    pub owner: AccountInfo<'info>,
+
     #[account(mut, seeds = [b"mint".as_ref()], bump)]
     pub mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct CollectPlayerResources<'info> {
     #[account(mut)]
-    /// CHECK: only to grab the PDA
-    pub owner: AccountInfo<'info>,
-    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
     pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct UpgradePlayerPalace<'info> {
-    #[account(mut, seeds = [b"player_palace".as_ref(), owner.key().as_ref()], bump)]
-    pub player_palace: Account<'info, PlayerPalace>,
     #[account(mut)]
-    /// CHECK: only to grab the PDA
-    pub owner: AccountInfo<'info>,
-    #[account(mut, seeds = [b"player".as_ref(), owner.key().as_ref()], bump)]
     pub player: Account<'info, Player>,
+    #[account(mut, seeds = [b"player_palace".as_ref(), player.key().as_ref()], bump)]
+    pub player_palace: Account<'info, PlayerPalace>,
     pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -339,4 +350,18 @@ pub enum ErrorCodes {
     NotEnoughLumber,
     #[msg("Could not burn tokens")]
     CouldNotBurnTokens,
+    #[msg("Unauthorized")]
+    Unauthorized,
+}
+
+// Custom access control for only allowing the game authority to call the methods
+fn only_authority(signer: &Pubkey) -> Result<()> {
+    let game_authority_string = "6e9pMiMWPdma3ohzcSHo4QGYMuFNqojQ7KKtz1Ri4qvd";
+    let game_authority = Pubkey::from_str(game_authority_string).unwrap();
+
+    if *signer != game_authority {
+        return Err(ErrorCodes::Unauthorized.into());
+    }
+
+    Ok(())
 }

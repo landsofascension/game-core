@@ -1,31 +1,54 @@
 import * as anchor from "@coral-xyz/anchor"
 import { Program } from "@coral-xyz/anchor"
-import { GameCore } from "../target/types/game_core"
-import {
-  createAssociatedTokenAccountInstruction,
-  getAssociatedTokenAddress,
-} from "@solana/spl-token"
 import { expect } from "chai"
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes"
+import { before } from "mocha"
+require("dotenv").config()
+import { GameCore } from "../target/types/game_core"
 
-if (!process.env.ANCHOR_WALLET || process.env.ANCHOR_WALLET === "") {
-  throw new Error("expected environment variable `ANCHOR_WALLET` is not set.")
+if (
+  !process.env.GAME_AUTHORITY_PRIVATE_KEY ||
+  process.env.GAME_AUTHORITY_PRIVATE_KEY === ""
+) {
+  throw new Error(
+    "Expected environment variable `GAME_AUTHORITY_PRIVATE_KEY` is not set."
+  )
 }
 
-const payer = anchor.web3.Keypair.fromSecretKey(
-  Buffer.from(
-    JSON.parse(
-      require("fs").readFileSync(process.env.ANCHOR_WALLET, {
-        encoding: "utf-8",
-      })
-    )
-  )
+const gameAuthority = anchor.web3.Keypair.fromSecretKey(
+  bs58.decode(process.env.GAME_AUTHORITY_PRIVATE_KEY as string)
 )
 
 describe("game-core", () => {
   anchor.setProvider(anchor.AnchorProvider.env())
 
   const program = anchor.workspace.GameCore as Program<GameCore>
+  const testPlayerUsername = "test_player"
 
+  const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("player"), Buffer.from(testPlayerUsername)],
+    anchor.workspace.GameCore.programId
+  )[0]
+
+  const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("player_palace"), playerAddress.toBytes()],
+    anchor.workspace.GameCore.programId
+  )[0]
+
+  const playerVault = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("player_vault"), playerAddress.toBytes()],
+    anchor.workspace.GameCore.programId
+  )[0]
+
+  before(async () => {
+    // airdrop to game authority
+    await program.provider.connection.confirmTransaction(
+      await program.provider.connection.requestAirdrop(
+        gameAuthority.publicKey,
+        1000000000000
+      )
+    )
+  })
   it("The program can create a token mint", async () => {
     const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint")],
@@ -36,7 +59,9 @@ describe("game-core", () => {
       .createTokenMint()
       .accounts({
         mint: mintAddress,
+        signer: gameAuthority.publicKey,
       })
+      .signers([gameAuthority])
       .rpc()
 
     const mint = await program.provider.connection.getAccountInfo(mintAddress)
@@ -45,23 +70,12 @@ describe("game-core", () => {
   })
 
   it("The player can sign up their account to initialize all core accounts", async () => {
-    // get player_palace PDA
-    const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player_palace"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    // get player PDA
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
     await program.methods
-      .signUpPlayer()
+      .signUpPlayer(testPlayerUsername)
       .accounts({
-        player: playerAddress,
+        signer: gameAuthority.publicKey,
       })
+      .signers([gameAuthority])
       .rpc()
 
     // fetch the player_palace account
@@ -77,34 +91,17 @@ describe("game-core", () => {
   })
 
   it("Tokens can be collected to the player vault", async () => {
-    const playerVault = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player_vault"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    const ix = await program.methods
+    await program.methods
       .collectPalaceTokens()
       .accounts({
-        owner: program.provider.publicKey,
+        player: playerAddress,
+        signer: gameAuthority.publicKey,
       })
-      .instruction()
-
-    const message = new anchor.web3.TransactionMessage({
-      instructions: [ix],
-      payerKey: payer.publicKey,
-      recentBlockhash: (await program.provider.connection.getRecentBlockhash())
-        .blockhash,
-    }).compileToV0Message()
-
-    const tx = new anchor.web3.VersionedTransaction(message)
-
-    tx.sign([payer])
+      .signers([gameAuthority])
+      .rpc()
 
     let previousBalance = 0
 
-    const txid = await program.provider.connection.sendTransaction(tx)
-
-    await program.provider.connection.confirmTransaction(txid)
     const newBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(playerVault))
         .value.amount
@@ -114,17 +111,6 @@ describe("game-core", () => {
   })
 
   it("The player can use their vault tokens to hire lumberjacks and miners", async () => {
-    // get player PDA
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    const playerVault = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player_vault"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
     let previousBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(playerVault))
         .value.amount
@@ -134,7 +120,11 @@ describe("game-core", () => {
     // Purchase a lumberjack
     await program.methods
       .purchaseMerchantItem("Lumberjack", amountToHire)
-      .accounts({ owner: program.provider.publicKey })
+      .accounts({
+        player: playerAddress,
+        signer: gameAuthority.publicKey,
+      })
+      .signers([gameAuthority])
       .rpc()
 
     // fetch the player account
@@ -151,7 +141,11 @@ describe("game-core", () => {
     // Purchase a miner
     await program.methods
       .purchaseMerchantItem("Miner", amountToHire)
-      .accounts({ owner: program.provider.publicKey })
+      .accounts({
+        player: playerAddress,
+        signer: gameAuthority.publicKey,
+      })
+      .signers([gameAuthority])
       .rpc()
 
     // fetch the player account
@@ -166,18 +160,16 @@ describe("game-core", () => {
   })
 
   it('The player can collect lumber and gold from their "workers"', async () => {
-    // get player PDA
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
     // fetch the player account
     const player = await program.account.player.fetch(playerAddress)
 
     await program.methods
       .collectPlayerResources()
-      .accounts({ owner: program.provider.publicKey })
+      .accounts({
+        player: playerAddress,
+        signer: gameAuthority.publicKey,
+      })
+      .signers([gameAuthority])
       .rpc()
 
     // fetch the player account
@@ -188,17 +180,6 @@ describe("game-core", () => {
   })
 
   it("The player can upgrade their palace", async () => {
-    // get player_palace PDA
-    const palaceAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player_palace"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
-    const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("player"), program.provider.publicKey.toBytes()],
-      anchor.workspace.GameCore.programId
-    )[0]
-
     const previousLevel = (
       await program.account.playerPalace.fetch(palaceAddress)
     ).level
@@ -209,7 +190,11 @@ describe("game-core", () => {
 
     const txid = await program.methods
       .upgradePlayerPalace()
-      .accounts({ owner: program.provider.publicKey })
+      .accounts({
+        player: playerAddress,
+        signer: gameAuthority.publicKey,
+      })
+      .signers([gameAuthority])
       .rpc()
 
     await program.provider.connection.confirmTransaction(txid)
@@ -231,3 +216,13 @@ describe("game-core", () => {
     await new Promise((resolve) => setTimeout(resolve, 500))
   })
 })
+
+// const anchorWallet = anchor.web3.Keypair.fromSecretKey(
+//   Buffer.from(
+//     JSON.parse(
+//       require("fs").readFileSync(process.env.ANCHOR_WALLET, {
+//         encoding: "utf-8",
+//       })
+//     )
+//   )
+// )
