@@ -23,7 +23,15 @@ describe("game-core", () => {
   anchor.setProvider(anchor.AnchorProvider.env())
 
   const program = anchor.workspace.GameCore as Program<GameCore>
-  const testPlayerUsername = "test_player"
+  const testPlayerUsername = "admin"
+  const adminStartingData = {
+    lumber: 0,
+    gold: 0,
+    lumberjacks: 0,
+    miners: 0,
+  }
+  const adminCollectingMinimumInHours = 1
+  const amountToHire = new anchor.BN(1000)
 
   const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("player"), Buffer.from(testPlayerUsername)],
@@ -45,10 +53,11 @@ describe("game-core", () => {
     await program.provider.connection.confirmTransaction(
       await program.provider.connection.requestAirdrop(
         gameAuthority.publicKey,
-        1000000000000
+        1e9
       )
     )
   })
+
   it("The program can create a token mint", async () => {
     const mintAddress = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("mint")],
@@ -87,10 +96,12 @@ describe("game-core", () => {
     const player = await program.account.player.fetch(playerAddress)
 
     expect(player_palace.level).to.be.eq(1)
-    expect(player.lumber.eq(new anchor.BN(0))).to.be.true
+
+    expect(player.lumber.eq(new anchor.BN(adminStartingData.lumber))).to.be.true
+    expect(player.gold.eq(new anchor.BN(adminStartingData.lumber))).to.be.true
   })
 
-  it("Tokens can be collected to the player vault", async () => {
+  it("The player can collect 3 tokens per hour from their vault", async () => {
     await program.methods
       .collectPalaceTokens()
       .accounts({
@@ -100,14 +111,14 @@ describe("game-core", () => {
       .signers([gameAuthority])
       .rpc()
 
-    let previousBalance = 0
-
     const newBalance = Number(
       (await program.provider.connection.getTokenAccountBalance(playerVault))
         .value.amount
     )
 
-    expect(newBalance).to.be.greaterThan(previousBalance)
+    // expect 1 second tokens reward = 3 tokens per hour / 3600 seconds
+    const rewardPerSecond = new anchor.BN(3).div(new anchor.BN(3600))
+    expect(newBalance).greaterThanOrEqual(rewardPerSecond.toNumber())
   })
 
   it("The player can use their vault tokens to hire lumberjacks and miners", async () => {
@@ -116,7 +127,6 @@ describe("game-core", () => {
         .value.amount
     )
 
-    const amountToHire = new anchor.BN(1000)
     // Purchase a lumberjack
     await program.methods
       .purchaseMerchantItem("Lumberjack", amountToHire)
@@ -134,7 +144,11 @@ describe("game-core", () => {
         .value.amount
     )
 
-    expect(player.lumberjacks.eq(amountToHire)).to.be.true
+    expect(
+      player.lumberjacks.eq(
+        amountToHire.add(new anchor.BN(adminStartingData.lumberjacks))
+      )
+    ).to.be.true
     expect(previousBalance).to.be.greaterThan(newBalance)
 
     previousBalance = newBalance
@@ -155,15 +169,19 @@ describe("game-core", () => {
         .value.amount
     )
 
-    expect(player.miners.eq(amountToHire)).to.be.true
+    expect(
+      player.miners.eq(
+        amountToHire.add(new anchor.BN(adminStartingData.miners))
+      )
+    ).to.be.true
     expect(previousBalance).to.be.greaterThan(newBalance)
   })
 
-  it('The player can collect lumber and gold from their "workers"', async () => {
+  it("The player can collect lumber and gold after waiting 1 hour", async () => {
     // fetch the player account
     const player = await program.account.player.fetch(playerAddress)
 
-    await program.methods
+    const txid = await program.methods
       .collectPlayerResources()
       .accounts({
         player: playerAddress,
@@ -172,11 +190,28 @@ describe("game-core", () => {
       .signers([gameAuthority])
       .rpc()
 
+    console.log(txid)
     // fetch the player account
-    const newPlayer = await program.account.player.fetch(playerAddress)
+    const updatedPlayer = await program.account.player.fetch(playerAddress)
 
-    expect(newPlayer.lumber.gt(player.lumber)).to.be.true
-    expect(newPlayer.gold.gt(player.gold)).to.be.true
+    expect(
+      updatedPlayer.lumber.eq(
+        player.lumber.add(
+          new anchor.BN(adminStartingData.lumberjacks)
+            .add(amountToHire)
+            .mul(new anchor.BN(adminCollectingMinimumInHours))
+        )
+      )
+    ).to.be.true
+    expect(
+      updatedPlayer.gold.eq(
+        player.gold.add(
+          new anchor.BN(adminStartingData.miners)
+            .add(amountToHire)
+            .mul(new anchor.BN(adminCollectingMinimumInHours))
+        )
+      )
+    ).to.be.true
   })
 
   it("The player can upgrade their palace", async () => {
@@ -213,7 +248,7 @@ describe("game-core", () => {
   })
 
   afterEach(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await new Promise((resolve) => setTimeout(resolve, 1000))
   })
 })
 
