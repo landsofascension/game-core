@@ -30,7 +30,7 @@ pub struct PlayerMerchant {
 }
 
 const MERCHANT_ITEMS: [&str; 2] = ["Lumberjack", "Miner"];
-const MERCHANT_ITEMS_COST: [u64; 2] = [1000, 500];
+const MERCHANT_ITEMS_COST: [u64; 2] = [2000000000, 2000000000];
 
 #[program]
 pub mod game_core {
