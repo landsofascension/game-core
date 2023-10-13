@@ -226,6 +226,7 @@ pub mod game_core {
             }
         };
 
+        msg!("palace_level: {}", palace_level);
         let token_decimals: u64 = 9;
         let amount_per_hour_with_decimals =
             (amount_per_hour as u64) * (10u64).pow(token_decimals as u32);

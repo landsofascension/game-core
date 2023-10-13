@@ -116,9 +116,11 @@ describe("game-core", () => {
         .value.amount
     )
 
-    // expect 1 second tokens reward = 3 tokens per hour / 3600 seconds
-    const rewardPerSecond = new anchor.BN(3).div(new anchor.BN(3600))
-    expect(newBalance).greaterThanOrEqual(rewardPerSecond.toNumber())
+    // expect 3 tokens per hour
+    const rewardPerHour = new anchor.BN(3e9)
+    expect(newBalance).lessThanOrEqual(
+      rewardPerHour.toNumber() * adminCollectingMinimumInHours * 3600
+    )
   })
 
   it("The player can use their vault tokens to hire lumberjacks and miners", async () => {
