@@ -1,6 +1,6 @@
 # game-core
 
-Core program for the game
+Core program for the Lands of Ascension game
 
 ## dev requisites
 

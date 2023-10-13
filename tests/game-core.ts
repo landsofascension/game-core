@@ -30,7 +30,7 @@ describe("game-core", () => {
     lumberjacks: 0,
     miners: 0,
   }
-  const adminCollectingMinimumInHours = 1
+  const adminCollectingMinimumInHours = 2
   const amountToHire = new anchor.BN(1000)
 
   const playerAddress = anchor.web3.PublicKey.findProgramAddressSync(
@@ -177,7 +177,7 @@ describe("game-core", () => {
     expect(previousBalance).to.be.greaterThan(newBalance)
   })
 
-  it("The player can collect lumber and gold after waiting 1 hour", async () => {
+  it(`The player can collect lumber and gold after waiting ${adminCollectingMinimumInHours} hours`, async () => {
     // fetch the player account
     const player = await program.account.player.fetch(playerAddress)
 
@@ -190,7 +190,6 @@ describe("game-core", () => {
       .signers([gameAuthority])
       .rpc()
 
-    console.log(txid)
     // fetch the player account
     const updatedPlayer = await program.account.player.fetch(playerAddress)
 

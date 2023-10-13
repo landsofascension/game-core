@@ -30,7 +30,7 @@ pub struct PlayerMerchant {
 }
 
 const MERCHANT_ITEMS: [&str; 2] = ["Lumberjack", "Miner"];
-const MERCHANT_ITEMS_COST: [u64; 2] = [2000000000, 2000000000];
+const MERCHANT_ITEMS_COST: [u64; 2] = [1000000000, 1000000000];
 
 #[program]
 pub mod game_core {
@@ -204,9 +204,9 @@ pub mod game_core {
             ctx.accounts.player_palace.last_mint_timestamp as u64
         );
 
-        // @tests admin always gets at least 1 hour worth of tokens
+        // @tests admin always gets at least 2 hours worth of tokens
         if ctx.accounts.player.username == "admin" {
-            seconds_elapsed = if seconds_elapsed < 3600 { 3600 } else { seconds_elapsed };
+            seconds_elapsed = if seconds_elapsed < 3600 { 7200 } else { seconds_elapsed };
         }
 
         let palace_level = ctx.accounts.player_palace.level;
@@ -261,22 +261,22 @@ pub mod game_core {
         msg!("last resources timestamp: {}", ctx.accounts.player.last_resources_timestamp);
 
         if ctx.accounts.player.last_resources_timestamp == 0 {
-            return err!(ErrorCodes::ResourcesNotInitialized);
+            return err!(ErrorCodes::NoResourcesToCollect);
         }
         let mut seconds_elapsed = ts_now.saturating_sub(
             ctx.accounts.player.last_resources_timestamp as u64
         );
 
-        // @tests admin always gets at least 1 hour worth of resources
+        // @tests admin always gets at least 2 hours worth of resources
         if ctx.accounts.player.username == "admin" {
-            seconds_elapsed = if seconds_elapsed < 3600 { 3600 } else { seconds_elapsed };
+            seconds_elapsed = if seconds_elapsed < 3600 { 7200 } else { seconds_elapsed };
         }
 
         msg!("seconds elapsed: {}", seconds_elapsed);
 
         // check if 1 hour passed
         if seconds_elapsed < 3600 {
-            return Ok(());
+            return err!(ErrorCodes::NoResourcesToCollect);
         }
 
         let hours_elapsed = seconds_elapsed / 3600;
@@ -439,7 +439,7 @@ pub enum ErrorCodes {
     #[msg("Unauthorized")]
     Unauthorized,
     #[msg("No resources to collect")]
-    ResourcesNotInitialized,
+    NoResourcesToCollect,
 }
 
 // Custom access control for only allowing the game authority to call the methods
